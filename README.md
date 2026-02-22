@@ -32,6 +32,8 @@ Add your key in `.env`:
 DEEPSEEK_API_KEY=your_real_key
 ```
 
+The script now loads `.env` automatically (even though Bun runs the `node` start script), so you do not need to manually `export` variables first.
+
 ## Start interactive AI chat mode (default mode)
 
 ```bash
