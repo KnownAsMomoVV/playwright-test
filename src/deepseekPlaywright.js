@@ -121,6 +121,28 @@ async function callDeepSeek(messages, responseFormat = 'json') {
   return responseFormat === 'json' ? JSON.parse(text) : text;
 }
 
+
+async function tryHandleCookieConsent(page) {
+  const candidates = [
+    () => page.getByRole('button', { name: /accept all|i agree|agree to all|allow all|accept cookies/i }).first(),
+    () => page.locator('button:has-text("Accept all")').first(),
+    () => page.locator('button:has-text("I agree")').first(),
+    () => page.locator('form [type="submit"]:has-text("Accept")').first(),
+    () => page.locator('[aria-label*="Accept" i]').first()
+  ];
+
+  for (const getLocator of candidates) {
+    const locator = getLocator();
+    if (await locator.count()) {
+      await locator.click({ timeout: 2000 });
+      await page.waitForTimeout(800);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function rewriteGoal(userGoal) {
   const result = await callDeepSeek([
     {
@@ -239,10 +261,17 @@ async function executeGoal(page, { task, maxSteps }) {
   const history = [];
   const extractedData = [];
   const goalSpec = await rewriteGoal(task);
+  const wantsCookieConsent = /cookie|consent/i.test(task);
 
   console.log('[goal]', JSON.stringify(goalSpec));
 
   for (let step = 1; step <= maxSteps; step += 1) {
+    if (wantsCookieConsent) {
+      const handled = await tryHandleCookieConsent(page);
+      if (handled) {
+        history.push({ step, action: 'heuristic-cookie-click', reason: 'Clicked visible consent button before planner step.' });
+      }
+    }
     const state = await buildPageState(page);
     const actionObj = await getNextAction({ goalSpec, step, maxSteps, state, history, extractedData });
 

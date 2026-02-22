@@ -4,6 +4,7 @@ This agent now has a **think + verify** loop so it is less likely to stop too ea
 
 ## Smarter behavior added
 
+- **Cookie-consent helper**: before each AI step, the agent tries common accept-cookie buttons automatically (helps with YouTube consent screens).
 - **Goal rewrite step**: AI rewrites your prompt into a structured objective before acting.
 - **Action planner step**: AI decides each browser action (`fill`, `click`, `press`, `extract`, etc.).
 - **Verifier step**: a second AI pass checks if the goal is actually complete.
