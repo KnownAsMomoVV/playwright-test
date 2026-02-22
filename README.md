@@ -1,48 +1,69 @@
-# Fully Automatic AI Playwright Agent (DeepSeek)
+# AI Browser Agent with Chat (DeepSeek + Playwright + Bun)
 
-This runs as an **autonomous browser agent**.
+Yes — you can **just tell DeepSeek what to do** in plain English.
 
-You give it a goal (example: _"Search Amazon for iPhone 17 cases under $50"_), and it:
-1. Opens the browser.
-2. Uses DeepSeek each step to decide the next Playwright action.
-3. Executes that action automatically.
-4. Stops when complete or when max steps is reached.
+Example request:
+- `go to youtube and get me the url of the first video for lo-fi beats`
 
-## Bun-first setup (recommended)
+The AI agent will plan actions, control Playwright, and return extracted output.
+
+## What AI is doing here
+
+DeepSeek is used in two places:
+
+1. **Planner AI** (every step):
+   - Reads live page state (title, URL, visible inputs/buttons/links).
+   - Chooses the next browser action as JSON (`fill`, `click`, `press`, `extract`, etc.).
+   - Playwright executes the action.
+2. **Response AI** (after each goal):
+   - Summarizes results back to you in chat.
+   - Includes extracted output (like video URLs) when available.
+
+## Setup (Bun)
 
 ```bash
 bun install
 cp .env.example .env
 ```
 
-Put your key in `.env`:
+Add your key in `.env`:
 
 ```bash
 DEEPSEEK_API_KEY=your_real_key
 ```
 
-## Run automatically with Bun
+## Start interactive AI chat mode (default mode)
 
 ```bash
-bun run start
+bun run start --headed
 ```
 
-Default run values:
-- Task: `Open Amazon and search for iPhone 17.`
-- URL: `https://www.amazon.com/`
-- Max steps: `8`
-
-## Custom goal
+(or explicit)
 
 ```bash
-bun run start --task "Search Amazon for iPhone 17 case with MagSafe"
+bun run start --chat --headed
+```
+
+Then type goals like:
+- `go to youtube and get me the first video url for lo-fi beats`
+- `search amazon for iphone 17 case with magsafe`
+- `open the first result`
+
+Type `exit` to quit.
+
+## One-shot mode (single goal)
+
+```bash
+bun run start --one-shot --task "Go to YouTube and get the first video URL for lo-fi beats"
 ```
 
 ## Useful flags
 
+- `--chat` interactive AI chat loop (same as default).
+- `--one-shot` run a single task and exit.
 - `--headed` show browser window.
-- `--max-steps 12` allow longer runs.
-- `--url "https://www.amazon.com"` custom start page.
+- `--max-steps 12` max AI actions per goal.
+- `--url "https://www.youtube.com"` custom start page.
 - `--dry-run` print config only.
 - `--no-screenshot` skip `automation-final.png`.
 
@@ -52,17 +73,8 @@ bun run start --task "Search Amazon for iPhone 17 case with MagSafe"
 - `AUTOMATION_START_URL`
 - `AUTOMATION_MAX_STEPS`
 
-## Notes for Bun users
-
-- `bun run start` uses the `start` script in `package.json`.
-- Bun can read `.env` automatically; this project also supports Node-style env usage.
-- If Playwright browsers are missing, run:
+If Playwright browsers are missing:
 
 ```bash
 bunx playwright install chromium
 ```
-
-## Output
-
-- Step-by-step agent action log in terminal.
-- Final screenshot: `automation-final.png`.
