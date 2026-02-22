@@ -3,34 +3,20 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
-
 function loadDotEnvIfPresent() {
   const envPath = path.resolve(process.cwd(), '.env');
-
-  if (!fs.existsSync(envPath)) {
-    return;
-  }
+  if (!fs.existsSync(envPath)) return;
 
   const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
-
   for (const line of lines) {
     const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) {
-      continue;
-    }
-
+    if (!trimmed || trimmed.startsWith('#')) continue;
     const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) {
-      continue;
-    }
+    if (eqIndex === -1) continue;
 
     const key = trimmed.slice(0, eqIndex).trim();
     let value = trimmed.slice(eqIndex + 1).trim();
-
-    if (!key || process.env[key] !== undefined) {
-      continue;
-    }
+    if (!key || process.env[key] !== undefined) continue;
 
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
@@ -49,7 +35,7 @@ function parseArgs(argv) {
   const args = {
     task: process.env.AUTOMATION_TASK || DEFAULT_TASK,
     startUrl: process.env.AUTOMATION_START_URL || 'https://www.amazon.com/',
-    maxSteps: Number.parseInt(process.env.AUTOMATION_MAX_STEPS || '8', 10),
+    maxSteps: Number.parseInt(process.env.AUTOMATION_MAX_STEPS || '12', 10),
     headless: true,
     saveScreenshot: true,
     dryRun: false,
@@ -59,7 +45,6 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-
     if (arg === '--task' && argv[i + 1]) {
       args.task = argv[i + 1];
       i += 1;
@@ -88,14 +73,8 @@ function parseArgs(argv) {
     throw new Error('--max-steps must be a positive integer.');
   }
 
-  if (args.chat && args.oneShot) {
-    throw new Error('Use either --chat or --one-shot, not both.');
-  }
-
-  if (!args.oneShot && !args.chat) {
-    args.chat = true;
-  }
-
+  if (args.chat && args.oneShot) throw new Error('Use either --chat or --one-shot, not both.');
+  if (!args.oneShot && !args.chat) args.chat = true;
   return args;
 }
 
@@ -106,7 +85,7 @@ Options:
   --chat                Start interactive AI chat mode
   --one-shot            Force one-shot mode (default is chat)
   --url "..."          Starting URL (default: https://www.amazon.com/)
-  --max-steps N         Maximum AI steps per goal (default: 8)
+  --max-steps N         Maximum AI steps per goal (default: 12)
   --headed              Run browser in headed mode
   --dry-run             Print config and exit
   --no-screenshot       Skip writing automation-final.png
@@ -120,27 +99,14 @@ async function launchBrowser(headless) {
 
 async function callDeepSeek(messages, responseFormat = 'json') {
   const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('Missing DEEPSEEK_API_KEY. Put it in .env or export it in your shell.');
 
-  if (!apiKey) {
-    throw new Error('Missing DEEPSEEK_API_KEY. Put it in .env or export it in your shell.');
-  }
-
-  const body = {
-    model: 'deepseek-chat',
-    messages,
-    temperature: 0.1
-  };
-
-  if (responseFormat === 'json') {
-    body.response_format = { type: 'json_object' };
-  }
+  const body = { model: 'deepseek-chat', messages, temperature: 0.1 };
+  if (responseFormat === 'json') body.response_format = { type: 'json_object' };
 
   const response = await fetch(DEEPSEEK_API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body)
   });
 
@@ -151,104 +117,75 @@ async function callDeepSeek(messages, responseFormat = 'json') {
 
   const data = await response.json();
   const text = data?.choices?.[0]?.message?.content?.trim();
-
-  if (!text) {
-    throw new Error('DeepSeek response was empty.');
-  }
-
+  if (!text) throw new Error('DeepSeek response was empty.');
   return responseFormat === 'json' ? JSON.parse(text) : text;
+}
+
+async function rewriteGoal(userGoal) {
+  const result = await callDeepSeek([
+    {
+      role: 'system',
+      content: 'Rewrite user request into a precise browser objective. Return JSON: {objective, mustDo, mustExtract, doneCriteria}.'
+    },
+    { role: 'user', content: userGoal }
+  ]);
+
+  return {
+    objective: result.objective || userGoal,
+    mustDo: Array.isArray(result.mustDo) ? result.mustDo : [],
+    mustExtract: Array.isArray(result.mustExtract) ? result.mustExtract : [],
+    doneCriteria: Array.isArray(result.doneCriteria) ? result.doneCriteria : []
+  };
 }
 
 async function buildPageState(page) {
   return page.evaluate(() => {
     const normalize = (value) => value?.replace(/\s+/g, ' ').trim() || '';
-
-    const inputs = Array.from(document.querySelectorAll('input,textarea')).slice(0, 12).map((el) => ({
-      type: el.tagName.toLowerCase(),
-      id: el.id || null,
-      name: el.getAttribute('name') || null,
-      placeholder: el.getAttribute('placeholder') || null,
-      ariaLabel: el.getAttribute('aria-label') || null
+    const inputs = Array.from(document.querySelectorAll('input,textarea')).slice(0, 14).map((el) => ({
+      type: el.tagName.toLowerCase(), id: el.id || null, name: el.getAttribute('name') || null,
+      placeholder: el.getAttribute('placeholder') || null, ariaLabel: el.getAttribute('aria-label') || null
     }));
-
-    const buttons = Array.from(document.querySelectorAll('button,input[type="submit"],a[role="button"]')).slice(0, 12).map((el) => ({
-      text: normalize(el.textContent) || el.getAttribute('value') || null,
-      id: el.id || null,
-      ariaLabel: el.getAttribute('aria-label') || null
+    const buttons = Array.from(document.querySelectorAll('button,input[type="submit"],a[role="button"]')).slice(0, 14).map((el) => ({
+      text: normalize(el.textContent) || el.getAttribute('value') || null, id: el.id || null, ariaLabel: el.getAttribute('aria-label') || null
     }));
-
-    const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 12).map((el) => ({
-      text: normalize(el.textContent).slice(0, 80),
-      href: el.getAttribute('href')
+    const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 16).map((el) => ({
+      text: normalize(el.textContent).slice(0, 100), href: el.getAttribute('href')
     }));
-
-    return {
-      title: document.title,
-      url: window.location.href,
-      inputs,
-      buttons,
-      links
-    };
+    return { title: document.title, url: window.location.href, inputs, buttons, links };
   });
 }
 
-async function getNextAction({ task, step, maxSteps, state, history, extractedData }) {
+async function getNextAction({ goalSpec, step, maxSteps, state, history, extractedData }) {
   const systemPrompt = [
-    'You are a web automation planner controlling Playwright.',
-    'Return strict JSON with keys: action, selector, text, url, done, reason.',
-    'Allowed action values: goto, fill, click, press, wait, extract, done.',
-    'Pick one action only, and choose robust selectors when possible.',
-    'Use action=extract to capture useful text/href/url (e.g., first YouTube video link).',
-    'For extract action: use selector when targeting an element, and set text to one of href|text|currentUrl.',
-    'Use action=done with done=true once task is complete.'
+    'You are a robust web automation planner for Playwright.',
+    'Return strict JSON: {action, selector, text, url, done, reason}.',
+    'Allowed actions: goto, fill, click, press, wait, extract, done.',
+    'Critical behavior: if an input is filled but search not submitted, next step should click submit or press Enter.',
+    'Avoid vague queries; use exact subject names from objective.',
+    'Do not mark done until doneCriteria are satisfied and mustExtract items are captured when possible.',
+    'For extract use text as href|text|currentUrl and provide selector unless currentUrl.'
   ].join('\n');
 
   const result = await callDeepSeek([
     { role: 'system', content: systemPrompt },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        task,
-        step,
-        maxSteps,
-        currentPage: state,
-        history,
-        extractedData
-      })
-    }
+    { role: 'user', content: JSON.stringify({ goalSpec, step, maxSteps, currentPage: state, history, extractedData }) }
   ]);
 
-  if (!result.action) {
-    throw new Error('DeepSeek did not provide an action.');
-  }
-
+  if (!result.action) throw new Error('DeepSeek did not provide an action.');
   return result;
 }
 
 async function extractFromPage(page, actionObj) {
   const mode = actionObj.text || 'text';
-
-  if (mode === 'currentUrl') {
-    return { mode, value: page.url(), selector: null };
-  }
-
-  if (!actionObj.selector) {
-    throw new Error('extract action requires selector unless using text="currentUrl"');
-  }
+  if (mode === 'currentUrl') return { mode, value: page.url(), selector: null };
+  if (!actionObj.selector) throw new Error('extract action requires selector unless using text="currentUrl"');
 
   const value = await page.locator(actionObj.selector).first().evaluate((el, selectedMode) => {
-    if (selectedMode === 'href') {
-      return el.getAttribute('href') || el.href || '';
-    }
-
+    if (selectedMode === 'href') return el.getAttribute('href') || el.href || '';
     return el.textContent?.trim() || '';
   }, mode);
 
-  return {
-    mode,
-    selector: actionObj.selector,
-    value
-  };
+  return { mode, selector: actionObj.selector, value };
 }
 
 async function runAction(page, actionObj) {
@@ -257,128 +194,111 @@ async function runAction(page, actionObj) {
     await page.goto(actionObj.url, { waitUntil: 'domcontentloaded' });
     return null;
   }
-
   if (actionObj.action === 'fill') {
-    if (!actionObj.selector || typeof actionObj.text !== 'string') {
-      throw new Error('fill action requires selector and text');
-    }
+    if (!actionObj.selector || typeof actionObj.text !== 'string') throw new Error('fill action requires selector and text');
     await page.locator(actionObj.selector).first().fill(actionObj.text);
     return null;
   }
-
   if (actionObj.action === 'click') {
     if (!actionObj.selector) throw new Error('click action requires selector');
     await page.locator(actionObj.selector).first().click();
     return null;
   }
-
   if (actionObj.action === 'press') {
     const key = actionObj.text || 'Enter';
-    if (actionObj.selector) {
-      await page.locator(actionObj.selector).first().press(key);
-    } else {
-      await page.keyboard.press(key);
-    }
+    if (actionObj.selector) await page.locator(actionObj.selector).first().press(key);
+    else await page.keyboard.press(key);
     return null;
   }
-
   if (actionObj.action === 'wait') {
     await page.waitForTimeout(1200);
     return null;
   }
-
-  if (actionObj.action === 'extract') {
-    return extractFromPage(page, actionObj);
-  }
-
-  if (actionObj.action === 'done') {
-    return null;
-  }
-
+  if (actionObj.action === 'extract') return extractFromPage(page, actionObj);
+  if (actionObj.action === 'done') return null;
   throw new Error(`Unsupported action: ${actionObj.action}`);
+}
+
+async function verifyGoalCompletion({ goalSpec, finalState, extractedData }) {
+  const verdict = await callDeepSeek([
+    {
+      role: 'system',
+      content: 'You are a strict verifier. Return JSON {completed:boolean, explanation:string, missing:string[]} based on goalSpec, finalState, extractedData.'
+    },
+    { role: 'user', content: JSON.stringify({ goalSpec, finalState, extractedData }) }
+  ]);
+
+  return {
+    completed: Boolean(verdict.completed),
+    explanation: verdict.explanation || '',
+    missing: Array.isArray(verdict.missing) ? verdict.missing : []
+  };
 }
 
 async function executeGoal(page, { task, maxSteps }) {
   const history = [];
   const extractedData = [];
+  const goalSpec = await rewriteGoal(task);
+
+  console.log('[goal]', JSON.stringify(goalSpec));
 
   for (let step = 1; step <= maxSteps; step += 1) {
     const state = await buildPageState(page);
-    const actionObj = await getNextAction({ task, step, maxSteps, state, history, extractedData });
+    const actionObj = await getNextAction({ goalSpec, step, maxSteps, state, history, extractedData });
 
-    history.push({
-      step,
-      action: actionObj.action,
-      selector: actionObj.selector || null,
-      text: actionObj.text || null,
-      reason: actionObj.reason || null
-    });
-
+    history.push({ step, action: actionObj.action, selector: actionObj.selector || null, text: actionObj.text || null, reason: actionObj.reason || null });
     console.log(`[step ${step}]`, JSON.stringify(actionObj));
 
-    if (actionObj.done || actionObj.action === 'done') {
-      return { history, extractedData, finalState: await buildPageState(page) };
-    }
+    if (actionObj.done || actionObj.action === 'done') break;
 
     try {
       const actionResult = await runAction(page, actionObj);
-
       if (actionResult) {
         extractedData.push({ step, ...actionResult });
         console.log(`[extract ${step}]`, JSON.stringify(actionResult));
       }
-
       await page.waitForLoadState('domcontentloaded');
     } catch (error) {
       history.push({ step, error: error.message });
     }
   }
 
-  return { history, extractedData, finalState: await buildPageState(page) };
+  const finalState = await buildPageState(page);
+  const verification = await verifyGoalCompletion({ goalSpec, finalState, extractedData });
+
+  return { history, extractedData, finalState, goalSpec, verification };
 }
 
-async function summarizeForUser({ userGoal, finalState, history, extractedData }) {
+async function summarizeForUser({ userGoal, goalSpec, finalState, history, extractedData, verification }) {
   const prompt = [
-    'You are an assistant summarizing a completed browser automation attempt.',
-    'Give a short plain-English response for the end user in 2-4 bullets.',
-    'If extractedData contains URLs or text answers, include them clearly.',
-    'Include whether goal looks completed and what to do next if not.'
+    'You are an assistant summarizing a browser automation result for end users.',
+    'Use 2-5 bullets. Include extracted links/text clearly.',
+    'Explicitly say if completed or not using verifier result, and suggest one next prompt if incomplete.'
   ].join('\n');
 
-  const content = JSON.stringify({
-    userGoal,
-    finalState,
-    extractedData,
-    recentHistory: history.slice(-6)
-  });
-
-  return callDeepSeek(
-    [
-      { role: 'system', content: prompt },
-      { role: 'user', content }
-    ],
-    'text'
-  );
+  const content = JSON.stringify({ userGoal, goalSpec, finalState, extractedData, verification, recentHistory: history.slice(-8) });
+  return callDeepSeek([{ role: 'system', content: prompt }, { role: 'user', content }], 'text');
 }
 
 async function runOneShotAgent({ task, startUrl, maxSteps, headless, saveScreenshot }) {
   const browser = await launchBrowser(headless);
   const page = await browser.newPage();
-
   try {
     await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
-    const { finalState, extractedData } = await executeGoal(page, { task, maxSteps });
+    const result = await executeGoal(page, { task, maxSteps });
 
     if (saveScreenshot) {
-      await page.screenshot({ path: 'automation-final.png', fullPage: true });
-      console.log('Saved screenshot to automation-final.png');
+      const shotPath = result.verification.completed ? 'automation-final.png' : 'automation-partial.png';
+      await page.screenshot({ path: shotPath, fullPage: true });
+      console.log(`Saved screenshot to ${shotPath}`);
     }
 
-    if (extractedData.length) {
-      console.log('Extracted data:', JSON.stringify(extractedData, null, 2));
+    if (result.extractedData.length) {
+      console.log('Extracted data:', JSON.stringify(result.extractedData, null, 2));
     }
 
-    console.log('Final URL:', finalState.url);
+    console.log('Verification:', JSON.stringify(result.verification));
+    console.log('Final URL:', result.finalState.url);
   } finally {
     await browser.close();
   }
@@ -392,32 +312,29 @@ async function runChatAgent({ startUrl, maxSteps, headless, saveScreenshot }) {
   try {
     await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
     console.log('AI browser chat is ready. Type goals like:');
-    console.log('  go to youtube and give me the first video url for lo-fi beats');
+    console.log('  go to youtube, find the newest cdawgva video, open it, and screenshot it');
     console.log('Type "exit" to stop.');
 
     while (true) {
       const userGoal = (await rl.question('\nYou> ')).trim();
+      if (!userGoal) continue;
+      if (userGoal.toLowerCase() === 'exit') break;
 
-      if (!userGoal) {
-        continue;
-      }
+      const result = await executeGoal(page, { task: userGoal, maxSteps });
+      const reply = await summarizeForUser({ userGoal, ...result });
 
-      if (userGoal.toLowerCase() === 'exit') {
-        break;
-      }
-
-      const { history, finalState, extractedData } = await executeGoal(page, { task: userGoal, maxSteps });
-      const reply = await summarizeForUser({ userGoal, finalState, history, extractedData });
       console.log(`\nAI> ${reply}`);
-      console.log(`AI> Current page: ${finalState.url}`);
+      console.log(`AI> Current page: ${result.finalState.url}`);
+      console.log(`AI> Verification: ${result.verification.completed ? 'completed' : 'not completed'} - ${result.verification.explanation}`);
 
-      if (extractedData.length) {
-        console.log(`AI> Extracted: ${JSON.stringify(extractedData)}`);
+      if (result.extractedData.length) {
+        console.log(`AI> Extracted: ${JSON.stringify(result.extractedData)}`);
       }
 
       if (saveScreenshot) {
-        await page.screenshot({ path: 'automation-final.png', fullPage: true });
-        console.log('AI> Updated screenshot: automation-final.png');
+        const shotPath = result.verification.completed ? 'automation-final.png' : 'automation-partial.png';
+        await page.screenshot({ path: shotPath, fullPage: true });
+        console.log(`AI> Updated screenshot: ${shotPath}`);
       }
     }
   } finally {
@@ -428,19 +345,12 @@ async function runChatAgent({ startUrl, maxSteps, headless, saveScreenshot }) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-
   if (args.help) {
     printHelp();
     return;
   }
 
-  console.log('AI Agent config:', JSON.stringify({
-    mode: args.chat ? 'chat' : 'one-shot',
-    task: args.task,
-    startUrl: args.startUrl,
-    maxSteps: args.maxSteps,
-    headless: args.headless
-  }));
+  console.log('AI Agent config:', JSON.stringify({ mode: args.chat ? 'chat' : 'one-shot', task: args.task, startUrl: args.startUrl, maxSteps: args.maxSteps, headless: args.headless }));
 
   if (args.dryRun) {
     console.log('Dry run mode; no browser session launched.');
@@ -448,22 +358,11 @@ async function main() {
   }
 
   if (args.chat) {
-    await runChatAgent({
-      startUrl: args.startUrl,
-      maxSteps: args.maxSteps,
-      headless: args.headless,
-      saveScreenshot: args.saveScreenshot
-    });
+    await runChatAgent({ startUrl: args.startUrl, maxSteps: args.maxSteps, headless: args.headless, saveScreenshot: args.saveScreenshot });
     return;
   }
 
-  await runOneShotAgent({
-    task: args.task,
-    startUrl: args.startUrl,
-    maxSteps: args.maxSteps,
-    headless: args.headless,
-    saveScreenshot: args.saveScreenshot
-  });
+  await runOneShotAgent({ task: args.task, startUrl: args.startUrl, maxSteps: args.maxSteps, headless: args.headless, saveScreenshot: args.saveScreenshot });
 }
 
 main().catch((error) => {

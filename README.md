@@ -1,23 +1,17 @@
 # AI Browser Agent with Chat (DeepSeek + Playwright + Bun)
 
-Yes — you can **just tell DeepSeek what to do** in plain English.
+This agent now has a **think + verify** loop so it is less likely to stop too early.
 
-Example request:
-- `go to youtube and get me the url of the first video for lo-fi beats`
+## Smarter behavior added
 
-The AI agent will plan actions, control Playwright, and return extracted output.
+- **Goal rewrite step**: AI rewrites your prompt into a structured objective before acting.
+- **Action planner step**: AI decides each browser action (`fill`, `click`, `press`, `extract`, etc.).
+- **Verifier step**: a second AI pass checks if the goal is actually complete.
+- **Outcome-aware screenshot**:
+  - `automation-final.png` when goal verified complete.
+  - `automation-partial.png` when not complete.
 
-## What AI is doing here
-
-DeepSeek is used in two places:
-
-1. **Planner AI** (every step):
-   - Reads live page state (title, URL, visible inputs/buttons/links).
-   - Chooses the next browser action as JSON (`fill`, `click`, `press`, `extract`, etc.).
-   - Playwright executes the action.
-2. **Response AI** (after each goal):
-   - Summarizes results back to you in chat.
-   - Includes extracted output (like video URLs) when available.
+This helps with cases like “find newest video”, where it should search, open, and verify instead of stopping early.
 
 ## Setup (Bun)
 
@@ -26,56 +20,36 @@ bun install
 cp .env.example .env
 ```
 
-Add your key in `.env`:
+Put your key in `.env`:
 
 ```bash
 DEEPSEEK_API_KEY=your_real_key
 ```
 
-The script now loads `.env` automatically (even though Bun runs the `node` start script), so you do not need to manually `export` variables first.
-
-## Start interactive AI chat mode (default mode)
+## Run chat mode (default)
 
 ```bash
 bun run start --headed
 ```
 
-(or explicit)
+Example prompt:
+
+- `go to youtube, find the newest cdawgva video, open it, and screenshot it`
+
+## One-shot mode
 
 ```bash
-bun run start --chat --headed
-```
-
-Then type goals like:
-- `go to youtube and get me the first video url for lo-fi beats`
-- `search amazon for iphone 17 case with magsafe`
-- `open the first result`
-
-Type `exit` to quit.
-
-## One-shot mode (single goal)
-
-```bash
-bun run start --one-shot --task "Go to YouTube and get the first video URL for lo-fi beats"
+bun run start --one-shot --task "Go to YouTube, find newest cdawgva video, open it, and screenshot it"
 ```
 
 ## Useful flags
 
-- `--chat` interactive AI chat loop (same as default).
-- `--one-shot` run a single task and exit.
-- `--headed` show browser window.
-- `--max-steps 12` max AI actions per goal.
-- `--url "https://www.youtube.com"` custom start page.
-- `--dry-run` print config only.
-- `--no-screenshot` skip `automation-final.png`.
+- `--max-steps 20` for harder tasks.
+- `--url "https://www.youtube.com"` to start directly on YouTube.
+- `--no-screenshot` to skip image output.
+- `--dry-run` to validate config only.
 
-## Environment defaults (`.env`)
-
-- `AUTOMATION_TASK`
-- `AUTOMATION_START_URL`
-- `AUTOMATION_MAX_STEPS`
-
-If Playwright browsers are missing:
+If Playwright browser is missing:
 
 ```bash
 bunx playwright install chromium
